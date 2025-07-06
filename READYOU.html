@@ -1,0 +1,1470 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>README Viewer - Просмотр в стиле GitHub</title>
+    <script>
+        // Библиотека READYOU.js - README Enhanced Display for Your Universe
+        (function(global) {
+            'use strict';
+            
+            if (global.READYOU) return;
+            
+            class READYOU {
+                constructor(options) {
+                    this.options = Object.assign({
+                        baseURL: '',
+                        highlight: this.advancedHighlight,
+                        theme: 'github-light',
+                        emojis: true,
+                        sanitize: true,
+                        containerClass: 'readyou-container',
+                        enableMermaid: false,
+                        enableMath: false,
+                        linkProcessor: this.processLinks
+                    }, options);
+                    
+                    this.themes = {
+                        'github-light': this.githubLightTheme,
+                        'github-dark': this.githubDarkTheme,
+                        'github-dimmed': this.githubDimmedTheme
+                    };
+                }
+
+                async render(container, source) {
+                    if (typeof container === 'string') {
+                        container = document.querySelector(container);
+                    }
+
+                    if (!container) {
+                        throw new Error('Container element not found');
+                    }
+
+                    container.classList.add(this.options.containerClass);
+                    
+                    try {
+                        const mdContent = typeof source === 'string' 
+                            ? source 
+                            : await this.fetchMarkdown(source);
+                            
+                        container.innerHTML = this.parseMarkdown(mdContent);
+                        this.applyStyles();
+                        this.processCodeBlocks(container);
+                        this.processLinks(container);
+                        this.processSpecialElements(container);
+                    } catch (e) {
+                        container.innerHTML = '<div class="readyou-error">Error: ' + e.message + '</div>';
+                        throw e;
+                    }
+                }
+
+                async fetchMarkdown(url) {
+                    const response = await fetch(this.resolveURL(url));
+                    if (!response.ok) throw new Error('Failed to load: ' + url);
+                    return await response.text();
+                }
+
+                resolveURL(url) {
+                    return url.startsWith('http') ? url : this.options.baseURL + url;
+                }
+
+                parseMarkdown(md) {
+                    // Обработка блоков кода
+                    md = md.replace(/```([\w-]+)?\s*([\s\S]*?)```/g, function(match, lang, code) {
+                        lang = lang || '';
+                        return '<pre><code class="language-' + lang + '">' + this.escapeHTML(code.trim()) + '</code></pre>';
+                    }.bind(this));
+
+                    // Основные замены
+                    return md
+                        .replace(/`([^`]+)`/g, '<code>$1</code>')
+                        .replace(/^###### (.*)$/gm, '<h6>$1</h6>')
+                        .replace(/^##### (.*)$/gm, '<h5>$1</h5>')
+                        .replace(/^#### (.*)$/gm, '<h4>$1</h4>')
+                        .replace(/^### (.*)$/gm, '<h3>$1</h3>')
+                        .replace(/^## (.*)$/gm, '<h2>$1</h2>')
+                        .replace(/^# (.*)$/gm, '<h1>$1</h1>')
+                        .replace(/^> (.*)$/gm, '<blockquote>$1</blockquote>')
+                        .replace(/^-{3,}$/gm, '<hr>')
+                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                        .replace(/~~(.*?)~~/g, '<del>$1</del>')
+                        .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1">')
+                        .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" class="md-link">$1</a>')
+                        .replace(/:(\w+):/g, this.options.emojis ? '<span class="emoji" title="$1">$1</span>' : ':$1:')
+                        .replace(/^(\s*)- \[(x| )\] (.*)$/gm, '<li class="task-item"><input type="checkbox" $2 disabled> $3</li>')
+                        .replace(/^(\s*)- (.*)$/gm, '<li>$2</li>')
+                        .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+                        .replace(/^\|(.*)\|$/gm, this.parseTable.bind(this))
+                        .replace(/^([^<>\n].+)$/gm, '<p>$1</p>')
+                        .replace(/<p>\s*<\/p>/g, '');
+                }
+
+                parseTable(match, row) {
+                    const columns = row.split('|').map(function(c) { return c.trim(); });
+                    if (columns.length < 2) return '';
+                    
+                    let isHeader = false;
+                    let html = '<table><tbody>';
+                    
+                    columns.forEach(function(col, idx) {
+                        if (idx === 0) html += '<tr>';
+                        
+                        if (col.includes('---')) {
+                            isHeader = true;
+                            return;
+                        }
+                        
+                        if (isHeader) {
+                            html += '<th>' + col + '</th>';
+                        } else {
+                            html += '<td>' + col + '</td>';
+                        }
+                        
+                        if (idx === columns.length - 1) html += '</tr>';
+                    });
+                    
+                    return html + '</tbody></table>';
+                }
+
+                escapeHTML(str) {
+                    return str.replace(/[&<>"']/g, function(tag) {
+                        return {
+                            '&': '&amp;',
+                            '<': '&lt;',
+                            '>': '&gt;',
+                            '"': '&quot;',
+                            "'": '&#39;'
+                        }[tag];
+                    });
+                }
+
+                advancedHighlight(code, lang) {
+                    const languages = {
+                        js: {
+                            keywords: ['function', 'const', 'let', 'var', 'return', 'if', 'else', 'for', 'while', 'class', 'async', 'await', 'export', 'import', 'new', 'this'],
+                            types: ['string', 'number', 'boolean', 'object', 'array'],
+                            literals: ['true', 'false', 'null', 'undefined']
+                        },
+                        html: {
+                            tags: ['div', 'span', 'a', 'img', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'tr', 'td', 'th', 'form', 'input', 'button'],
+                            attributes: ['class', 'id', 'href', 'src', 'alt', 'title', 'type', 'value']
+                        },
+                        css: {
+                            properties: ['color', 'background', 'font', 'width', 'height', 'margin', 'padding', 'display', 'position', 'border', 'flex'],
+                            values: ['#', 'rgba', 'px', 'em', 'rem', '%', '!important']
+                        },
+                        python: {
+                            keywords: ['def', 'class', 'import', 'from', 'as', 'if', 'elif', 'else', 'for', 'while', 'try', 'except', 'finally', 'with', 'return', 'yield', 'lambda'],
+                            builtins: ['print', 'range', 'len', 'str', 'int', 'list', 'dict', 'set']
+                        }
+                    };
+
+                    lang = (lang || '').toLowerCase();
+                    const config = languages[lang] || {};
+                    
+                    // Обработка комментариев
+                    code = code.replace(/(\/\/.*|\/\*[\s\S]*?\*\/)/g, '<span class=>$1</span>');
+                    
+                    // Обработка строк
+                    code = code.replace(/(".*?"|'.*?')/g, '<span class="string">$1</span>');
+                    
+                    // Обработка чисел
+                    code = code.replace(/\b(\d+\.?\d*)\b/g, '<span class="number">$1</span>');
+                    
+                    // Обработка ключевых слов
+                    if (config.keywords) {
+                        const regex = new RegExp('\\b(' + config.keywords.join('|') + ')\\b', 'g');
+                        code = code.replace(regex, '<span class="keyword">$1</span>');
+                    }
+                    
+                    // Обработка типов
+                    if (config.types) {
+                        const regex = new RegExp('\\b(' + config.types.join('|') + ')\\b', 'g');
+                        code = code.replace(regex, '<span class="type">$1</span>');
+                    }
+                    
+                    return code;
+                }
+
+                processSpecialElements(container) {
+                    // Подсветка текущей секции при прокрутке
+                    const headers = container.querySelectorAll('h1, h2, h3, h4, h5, h6');
+                    const observer = new IntersectionObserver(function(entries) {
+                        entries.forEach(function(entry) {
+                            if (entry.isIntersecting) {
+                                headers.forEach(function(h) { h.classList.remove('active-section'); });
+                                entry.target.classList.add('active-section');
+                            }
+                        });
+                    }, { threshold: 0.5 });
+
+                    headers.forEach(function(header) { observer.observe(header); });
+                }
+
+                processLinks(container) {
+                    const links = container.querySelectorAll('a.md-link');
+                    for (let i = 0; i < links.length; i++) {
+                        const link = links[i];
+                        const href = link.getAttribute('href');
+                        
+                        // Добавление иконок для разных типов ссылок
+                        if (href.startsWith('http')) {
+                            link.innerHTML += ' <span class="external-icon">↗</span>';
+                            link.setAttribute('target', '_blank');
+                            link.setAttribute('rel', 'noopener noreferrer');
+                        } else if (href.startsWith('#')) {
+                            link.innerHTML += ' <span class="anchor-icon">#</span>';
+                        } else if (href.startsWith('mailto:')) {
+                            link.innerHTML += ' <span class="email-icon">✉</span>';
+                        }
+                        
+                        // Подсветка активных ссылок
+                        link.addEventListener('mouseenter', function() {
+                            link.classList.add('link-hover');
+                        });
+                        
+                        link.addEventListener('mouseleave', function() {
+                            link.classList.remove('link-hover');
+                        });
+                    }
+                }
+
+                processCodeBlocks(container) {
+                    const blocks = container.querySelectorAll('pre > code');
+                    for (let i = 0; i < blocks.length; i++) {
+                        const block = blocks[i];
+                        const langMatch = block.className.match(/language-(\w+)/);
+                        const lang = langMatch ? langMatch[1] : '';
+                        
+                        if (lang === 'mermaid' || lang === 'math') continue;
+                        
+                        // Добавление кнопки копирования
+                        const copyBtn = document.createElement('button');
+                        copyBtn.className = 'copy-btn';
+                        copyBtn.innerHTML = '📋';
+                        copyBtn.title = 'Скопировать код';
+                        
+                        copyBtn.addEventListener('click', function() {
+                            navigator.clipboard.writeText(block.textContent).then(function() {
+                                copyBtn.innerHTML = '✓';
+                                setTimeout(function() { copyBtn.innerHTML = '📋'; }, 2000);
+                            });
+                        });
+                        
+                        block.parentElement.appendChild(copyBtn);
+                        
+                        // Подсветка синтаксиса
+                        if (this.options.highlight) {
+                            block.innerHTML = this.options.highlight(block.textContent, lang);
+                        }
+                        
+                        // Добавляем метку языка
+                        if (lang) {
+                            const langLabel = document.createElement('div');
+                            langLabel.className = 'lang-label';
+                            langLabel.textContent = lang.toUpperCase();
+                            block.parentElement.insertBefore(langLabel, block);
+                        }
+                    }
+                }
+
+                applyStyles() {
+                    if (document.getElementById('readyou-styles')) return;
+
+                    const style = document.createElement('style');
+                    style.id = 'readyou-styles';
+                    
+                    // Применение выбранной темы
+                    const theme = this.themes[this.options.theme] || this.githubLightTheme;
+                    style.textContent = theme();
+                    
+                    document.head.appendChild(style);
+                }
+
+                githubLightTheme() {
+                    return `
+                        .readyou-container {
+                            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+                            line-height: 1.6;
+                            color: #24292f;
+                            max-width: 800px;
+                            margin: 0 auto;
+                            padding: 20px;
+                            background: white;
+                        }
+                        
+                        h1, h2, h3, h4, h5, h6 {
+                            margin: 1.2em 0 0.6em;
+                            font-weight: 600;
+                            line-height: 1.25;
+                        }
+                        
+                        h1 { font-size: 2em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
+                        h2 { font-size: 1.5em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
+                        h3 { font-size: 1.25em; }
+                        h4 { font-size: 1em; }
+                        h5 { font-size: 0.875em; }
+                        h6 { font-size: 0.85em; color: #6a737d; }
+                        
+                        .active-section {
+                            background: rgba(9,105,218,0.1);
+                            padding: 2px 8px;
+                            border-radius: 4px;
+                        }
+                        
+                        p { margin: 0 0 16px; }
+                        a { color: #0969da; text-decoration: none; }
+                        a:hover { text-decoration: underline; }
+                        .md-link { color: #0969da; }
+                        .link-hover { background: rgba(9,105,218,0.1); }
+                        strong { font-weight: 600; }
+                        em { font-style: italic; }
+                        del { text-decoration: line-through; color: #6a737d; }
+                        hr { height: 0.25em; background: #e1e4e8; border: 0; margin: 24px 0; }
+                        
+                        ul, ol { padding-left: 2em; margin-bottom: 16px; }
+                        li { margin-bottom: 0.5em; }
+                        .task-item { list-style: none; margin-left: -1.5em; }
+                        
+                        code {
+                            background: rgba(175,184,193,0.2);
+                            border-radius: 6px;
+                            padding: 0.2em 0.4em;
+                            font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+                            font-size: 85%;
+                        }
+                        
+                        pre {
+                            background: #f6f8fa;
+                            border-radius: 6px;
+                            padding: 16px;
+                            overflow: auto;
+                            position: relative;
+                            margin-bottom: 16px;
+                            border: 1px solid #e1e4e8;
+                        }
+                        
+                        pre code {
+                            background: transparent;
+                            padding: 0;
+                            display: block;
+                            line-height: 1.45;
+                        }
+                        
+                        .copy-btn {
+                            position: absolute;
+                            top: 8px;
+                            right: 8px;
+                            background: rgba(255,255,255,0.8);
+                            border: 1px solid #e1e4e8;
+                            border-radius: 4px;
+                            padding: 4px 8px;
+                            cursor: pointer;
+                            font-size: 0.9em;
+                            opacity: 0.6;
+                            transition: opacity 0.2s;
+                        }
+                        
+                        .copy-btn:hover {
+                            opacity: 1;
+                            background: white;
+                        }
+                        
+                        .lang-label {
+                            position: absolute;
+                            top: 0;
+                            right: 0;
+                            background: #e1e4e8;
+                            color: #6a737d;
+                            padding: 2px 8px;
+                            font-size: 0.8em;
+                            border-bottom-left-radius: 6px;
+                        }
+                        
+                        .keyword { color: #d73a49; }
+                        .type { color: #6f42c1; }
+                        .literal { color: #005cc5; }
+                        .string { color: #032f62; }
+                        .number { color: #005cc5; }
+                        .comment { color: #6a737d; font-style: italic; }
+                        .tag { color: #22863a; }
+                        .attribute { color: #6f42c1; }
+                        .property { color: #d73a49; }
+                        .value { color: #e36209; }
+                        .builtin { color: #6f42c1; }
+                        
+                        .emoji { 
+                            display: inline-block;
+                            width: 1.2em; 
+                            text-align: center;
+                            font-style: normal;
+                        }
+                        
+                        img { 
+                            max-width: 100%; 
+                            box-sizing: border-box;
+                            border-radius: 6px;
+                            border: 1px solid #e1e4e8;
+                        }
+                        
+                        blockquote {
+                            border-left: 0.25em solid #dfe2e5;
+                            color: #6a737d;
+                            padding: 0 1em;
+                            margin: 0 0 16px;
+                            background: #f6f8fa;
+                            border-radius: 0 6px 6px 0;
+                        }
+                        
+                        table {
+                            border-collapse: collapse;
+                            margin-bottom: 16px;
+                            width: 100%;
+                            border: 1px solid #e1e4e8;
+                            border-radius: 6px;
+                            overflow: hidden;
+                        }
+                        
+                        th, td {
+                            border: 1px solid #e1e4e8;
+                            padding: 6px 13px;
+                            text-align: left;
+                        }
+                        
+                        th {
+                            background: #f6f8fa;
+                            font-weight: 600;
+                        }
+                        
+                        tr:nth-child(even) {
+                            background-color: #f6f8fa;
+                        }
+                        
+                        .mermaid-diagram {
+                            background: white;
+                            padding: 16px;
+                            border-radius: 6px;
+                            border: 1px solid #e1e4e8;
+                            margin: 16px 0;
+                            text-align: center;
+                        }
+                        
+                        .readyou-error {
+                            background: #ffebe9;
+                            border: 1px solid #ff7b72;
+                            border-radius: 6px;
+                            padding: 16px;
+                            color: #cf222e;
+                        }
+                    `;
+                }
+
+                githubDarkTheme() {
+                    return `
+                        .readyou-container {
+                            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+                            line-height: 1.6;
+                            color: #e6edf3;
+                            max-width: 800px;
+                            margin: 0 auto;
+                            padding: 20px;
+                            background: #0d1117;
+                        }
+                        
+                        h1, h2, h3, h4, h5, h6 {
+                            color: #e6edf3;
+                        }
+                        
+                        h1, h2 { border-color: #30363d; }
+                        
+                        .active-section {
+                            background: rgba(88,166,255,0.2);
+                        }
+                        
+                        a { color: #2f81f7; }
+                        .md-link { color: #2f81f7; }
+                        .link-hover { background: rgba(88,166,255,0.1); }
+                        
+                        hr { background: #30363d; }
+                        
+                        code {
+                            background: rgba(110,118,129,0.4);
+                        }
+                        
+                        pre {
+                            background: #161b22;
+                            border-color: #30363d;
+                        }
+                        
+                        .copy-btn {
+                            background: rgba(22,27,34,0.8);
+                            border-color: #30363d;
+                            color: #e6edf3;
+                        }
+                        
+                        .lang-label {
+                            background: #30363d;
+                            color: #8b949e;
+                        }
+                        
+                        .keyword { color: #ff7b72; }
+                        .type { color: #d2a8ff; }
+                        .literal { color: #79c0ff; }
+                        .string { color: #a5d6ff; }
+                        .number { color: #79c0ff; }
+                        .comment { color: #8b949e; }
+                        .tag { color: #7ee787; }
+                        .attribute { color: #d2a8ff; }
+                        .property { color: #ff7b72; }
+                        .value { color: #ffa657; }
+                        .builtin { color: #d2a8ff; }
+                        
+                        img { 
+                            border-color: #30363d;
+                        }
+                        
+                        blockquote {
+                            border-color: #30363d;
+                            background: #161b22;
+                            color: #8b949e;
+                        }
+                        
+                        table {
+                            border-color: #30363d;
+                        }
+                        
+                        th, td {
+                            border-color: #30363d;
+                        }
+                        
+                        th {
+                            background: #161b22;
+                        }
+                        
+                        tr:nth-child(even) {
+                            background-color: #161b22;
+                        }
+                        
+                        .mermaid-diagram {
+                            background: #161b22;
+                            border-color: #30363d;
+                        }
+                        
+                        .readyou-error {
+                            background: rgba(248,81,73,0.15);
+                            border-color: #f85149;
+                            color: #ff7b72;
+                        }
+                    ` + this.githubLightTheme();
+                }
+            }
+
+            // Автоматическая инициализация
+            document.addEventListener('DOMContentLoaded', function() {
+                const containers = document.querySelectorAll('[data-readyou]');
+                for (let i = 0; i < containers.length; i++) {
+                    const container = containers[i];
+                    const source = container.dataset.readyou;
+                    if (source) {
+                        try {
+                            const options = {
+                                baseURL: container.dataset.base || '',
+                                theme: container.dataset.theme || 'github-light',
+                                enableMermaid: container.dataset.mermaid === 'true',
+                                enableMath: container.dataset.math === 'true'
+                            };
+                            
+                            const readyou = new READYOU(options);
+                            readyou.render(container, source);
+                        } catch (e) {
+                            container.innerHTML = '<div class="readyou-error">Error: ' + e.message + '</div>';
+                        }
+                    }
+                }
+            });
+
+            // Экспортируем класс в глобальную область видимости
+            global.READYOU = READYOU;
+        })(window);
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        
+        :root {
+            --primary: #1a2a6c;
+            --secondary: #b21f1f;
+            --accent: #ff5252;
+            --bg: #f8f9fa;
+            --card-bg: #ffffff;
+            --text: #333333;
+            --text-light: #6c757d;
+            --border: #e0e0e0;
+            --success: #28a745;
+            --shadow: 0 4px 12px rgba(0,0,0,0.1);
+            --header-height: 60px;
+            --sidebar-width: 300px;
+        }
+        
+        .dark-theme {
+            --primary: #6f42c1;
+            --secondary: #d73a49;
+            --accent: #ff7b72;
+            --bg: #0d1117;
+            --card-bg: #161b22;
+            --text: #e6edf3;
+            --text-light: #8b949e;
+            --border: #30363d;
+            --success: #3fb950;
+            --shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Шапка сайта */
+        header {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            padding: 0 20px;
+            height: var(--header-height);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--shadow);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        
+        .logo i {
+            font-size: 1.8rem;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .theme-toggle {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            font-size: 1.2rem;
+        }
+        
+        .theme-toggle:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        /* Основной контент */
+        .container {
+            display: flex;
+            flex: 1;
+            padding: 20px;
+            gap: 20px;
+            max-width: 1800px;
+            margin: 0 auto;
+            width: 100%;
+        }
+        
+        /* Боковая панель */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            height: calc(100vh - var(--header-height) - 40px);
+            position: sticky;
+            top: calc(var(--header-height) + 20px);
+        }
+        
+        .sidebar-section {
+            background: rgba(0,0,0,0.03);
+            border-radius: 8px;
+            padding: 15px;
+        }
+        
+        .dark-theme .sidebar-section {
+            background: rgba(255,255,255,0.05);
+        }
+        
+        .section-title {
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        /* Основная область просмотра */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .preview-container {
+            flex: 1;
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: var(--shadow);
+            overflow: auto;
+        }
+        
+        /* Формы и кнопки */
+        .upload-area {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 25px;
+            text-align: center;
+            background: var(--bg);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .upload-area:hover {
+            border-color: var(--accent);
+            background: rgba(255,82,82,0.05);
+        }
+        
+        .upload-icon {
+            font-size: 3rem;
+            color: var(--primary);
+            margin-bottom: 15px;
+        }
+        
+        .upload-text {
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            color: var(--text-light);
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            font-size: 1rem;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-weight: 600;
+        }
+        
+        .btn:hover {
+            background: var(--secondary);
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(178,31,31,0.2);
+        }
+        
+        .btn-secondary {
+            background: var(--card-bg);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(0,0,0,0.05);
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .url-input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 1rem;
+            background: var(--bg);
+            color: var(--text);
+        }
+        
+        .url-input:focus {
+            border-color: var(--accent);
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(255,82,82,0.2);
+        }
+        
+        /* История */
+        .history-list {
+            list-style: none;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        
+        .history-item {
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .history-item:last-child {
+            border-bottom: none;
+        }
+        
+        .history-item:hover {
+            background: rgba(0,0,0,0.03);
+        }
+        
+        .dark-theme .history-item:hover {
+            background: rgba(255,255,255,0.05);
+        }
+        
+        .history-name {
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 180px;
+        }
+        
+        .history-date {
+            font-size: 0.85rem;
+            color: var(--text-light);
+        }
+        
+        .history-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .action-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg);
+            color: var(--text);
+            border: 1px solid var(--border);
+            cursor: pointer;
+        }
+        
+        .action-btn:hover {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+        
+        /* Оповещения */
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(40,167,69,0.1);
+            color: var(--success);
+            border: 1px solid rgba(40,167,69,0.2);
+        }
+        
+        .alert.error {
+            background: rgba(220,53,69,0.1);
+            color: #dc3545;
+            border-color: rgba(220,53,69,0.2);
+        }
+        
+        /* Мобильная адаптация */
+        @media (max-width: 992px) {
+            .container {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: relative;
+                top: 0;
+            }
+            
+            .history-list {
+                max-height: 200px;
+            }
+        }
+        
+        @media (max-width: 576px) {
+            header {
+                padding: 0 10px;
+            }
+            
+            .logo span {
+                display: none;
+            }
+            
+            .container {
+                padding: 10px;
+            }
+            
+            .sidebar, .preview-container {
+                padding: 15px;
+            }
+            
+            .upload-area {
+                padding: 15px;
+            }
+        }
+        
+        /* Заглушка для превью */
+        .placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            height: 100%;
+            color: var(--text-light);
+            gap: 20px;
+            padding: 40px 0;
+        }
+        
+        .placeholder-icon {
+            font-size: 4rem;
+            color: var(--border);
+        }
+        
+        .placeholder-text {
+            max-width: 400px;
+        }
+        
+        /* Индикатор загрузки */
+        .loader {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            height: 100%;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(26,42,108,0.2);
+            border-top: 5px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Шапка сайта -->
+    <header>
+        <div class="logo">
+            <span>📄 README Viewer</span>
+        </div>
+        <div class="controls">
+            <button class="theme-toggle" id="themeToggle">
+                🌙
+            </button>
+        </div>
+    </header>
+    
+    <!-- Основной контент -->
+    <div class="container">
+        <!-- Боковая панель -->
+        <div class="sidebar">
+            <div class="sidebar-section">
+                <h3 class="section-title">📤 Загрузка файла</h3>
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">
+                        ☁️
+                    </div>
+                    <p class="upload-text">Перетащите сюда ваш README.md файл или нажмите кнопку</p>
+                    <button class="btn" id="uploadBtn">
+                        📂 Выбрать файл
+                    </button>
+                    <input type="file" id="fileInput" class="file-input" accept=".md">
+                </div>
+                
+                <div style="text-align: center; margin: 20px 0; color: var(--text-light); font-size: 1.1rem;">
+                    ИЛИ
+                </div>
+                
+                <div>
+                    <input type="text" id="urlInput" class="url-input" placeholder="Введите URL README.md">
+                    <button class="btn" id="loadUrlBtn" style="width: 100%; margin-top: 10px;">
+                        ⬇️ Загрузить по URL
+                    </button>
+                </div>
+            </div>
+            
+            <div class="sidebar-section">
+                <h3 class="section-title">🕒 История загрузок</h3>
+                <div class="alert" id="historyAlert" style="display: none;">
+                    <span>✅ Файл успешно загружен и добавлен в историю!</span>
+                </div>
+                <ul class="history-list" id="historyList">
+                    <!-- История будет заполнена динамически -->
+                </ul>
+                <button class="btn btn-secondary" id="clearHistory" style="width: 100%; margin-top: 10px;">
+                    🗑️ Очистить историю
+                </button>
+            </div>
+            
+            <div class="sidebar-section">
+                <h3 class="section-title">💡 Примеры</h3>
+                <p style="margin-bottom: 15px; color: var(--text-light);">
+                    Попробуйте загрузить один из примеров для тестирования:
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <button class="btn btn-secondary" onclick="loadExample('sample1')">
+                        Простой README
+                    </button>
+                    <button class="btn btn-secondary" onclick="loadExample('sample2')">
+                        README с таблицами
+                    </button>
+                    <button class="btn btn-secondary" onclick="loadExample('sample3')">
+                        README с кодом
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Основная область просмотра -->
+        <div class="main-content">
+            <div class="preview-container" id="previewContainer">
+                <div class="placeholder">
+                    <div class="placeholder-icon">
+                        📝
+                    </div>
+                    <h3>Превью README.md</h3>
+                    <p class="placeholder-text">
+                        Загрузите файл или укажите URL, чтобы увидеть результат. 
+                        Ваш README будет отображен в стиле GitHub с подсветкой синтаксиса.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Элементы DOM
+        const themeToggle = document.getElementById('themeToggle');
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const loadUrlBtn = document.getElementById('loadUrlBtn');
+        const urlInput = document.getElementById('urlInput');
+        const previewContainer = document.getElementById('previewContainer');
+        const historyList = document.getElementById('historyList');
+        const clearHistoryBtn = document.getElementById('clearHistory');
+        const historyAlert = document.getElementById('historyAlert');
+        
+        // Текущая тема
+        let currentTheme = localStorage.getItem('theme') || 'light';
+        
+        // Инициализация темы
+        function initTheme() {
+            if (currentTheme === 'dark') {
+                document.body.classList.add('dark-theme');
+                themeToggle.textContent = '☀️';
+            } else {
+                document.body.classList.remove('dark-theme');
+                themeToggle.textContent = '🌙';
+            }
+        }
+        
+        // Переключение темы
+        themeToggle.addEventListener('click', function() {
+            if (currentTheme === 'light') {
+                currentTheme = 'dark';
+                document.body.classList.add('dark-theme');
+                themeToggle.textContent = '☀️';
+            } else {
+                currentTheme = 'light';
+                document.body.classList.remove('dark-theme');
+                themeToggle.textContent = '🌙';
+            }
+            localStorage.setItem('theme', currentTheme);
+        });
+        
+        // Инициализация истории
+        function initHistory() {
+            const history = JSON.parse(localStorage.getItem('readmeHistory')) || [];
+            renderHistory(history);
+        }
+        
+        // Отображение истории
+        function renderHistory(history) {
+            historyList.innerHTML = '';
+            
+            if (history.length === 0) {
+                historyList.innerHTML = '<li class="history-item" style="justify-content: center; color: var(--text-light);">История пуста</li>';
+                return;
+            }
+            
+            history.slice(0, 10).forEach(function(item, index) {
+                const li = document.createElement('li');
+                li.className = 'history-item';
+                li.dataset.index = index;
+                
+                const date = new Date(item.timestamp);
+                const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                
+                li.innerHTML = `
+                    <div>
+                        <div class="history-name">${item.name}</div>
+                        <div class="history-date">${formattedDate}</div>
+                    </div>
+                    <div class="history-actions">
+                        <button class="action-btn view-btn" title="Просмотреть">
+                            👁️
+                        </button>
+                        <button class="action-btn delete-btn" title="Удалить">
+                            ❌
+                        </button>
+                    </div>
+                `;
+                
+                historyList.appendChild(li);
+                
+                // Обработчики для кнопок
+                li.querySelector('.view-btn').addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    loadFromHistory(index);
+                });
+                
+                li.querySelector('.delete-btn').addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    deleteFromHistory(index);
+                });
+                
+                li.addEventListener('click', function() {
+                    loadFromHistory(index);
+                });
+            });
+        }
+        
+        // Добавление в историю
+        function addToHistory(name, content, isUrl) {
+            const history = JSON.parse(localStorage.getItem('readmeHistory')) || [];
+            
+            // Проверяем, есть ли уже такой файл в истории
+            const existingIndex = history.findIndex(function(item) { return item.name === name; });
+            if (existingIndex !== -1) {
+                history.splice(existingIndex, 1);
+            }
+            
+            // Добавляем в начало истории
+            history.unshift({
+                name: name,
+                content: content,
+                isUrl: isUrl,
+                timestamp: Date.now()
+            });
+            
+            // Сохраняем только последние 10 записей
+            const limitedHistory = history.slice(0, 10);
+            localStorage.setItem('readmeHistory', JSON.stringify(limitedHistory));
+            
+            // Обновляем отображение
+            renderHistory(limitedHistory);
+            
+            // Показываем оповещение
+            historyAlert.style.display = 'flex';
+            setTimeout(function() {
+                historyAlert.style.display = 'none';
+            }, 3000);
+        }
+        
+        // Загрузка из истории
+        function loadFromHistory(index) {
+            const history = JSON.parse(localStorage.getItem('readmeHistory')) || [];
+            if (index >= 0 && index < history.length) {
+                const item = history[index];
+                
+                if (item.isUrl) {
+                    previewContainer.innerHTML = `
+                        <div class="loader">
+                            <div class="spinner"></div>
+                            <p>Загрузка файла по URL...</p>
+                        </div>
+                    `;
+                    
+                    try {
+                        const readyou = new READYOU();
+                        readyou.render(previewContainer, item.content);
+                    } catch (e) {
+                        previewContainer.innerHTML = '<div class="alert error">❌ Ошибка: ' + e.message + '</div>';
+                    }
+                } else {
+                    try {
+                        const readyou = new READYOU();
+                        previewContainer.innerHTML = '';
+                        readyou.render(previewContainer, item.content);
+                    } catch (e) {
+                        previewContainer.innerHTML = '<div class="alert error">❌ Ошибка: ' + e.message + '</div>';
+                    }
+                }
+            }
+        }
+        
+        // Удаление из истории
+        function deleteFromHistory(index) {
+            const history = JSON.parse(localStorage.getItem('readmeHistory')) || [];
+            if (index >= 0 && index < history.length) {
+                history.splice(index, 1);
+                localStorage.setItem('readmeHistory', JSON.stringify(history));
+                renderHistory(history);
+            }
+        }
+        
+        // Очистка истории
+        clearHistoryBtn.addEventListener('click', function() {
+            if (confirm('Вы уверены, что хотите очистить всю историю?')) {
+                localStorage.removeItem('readmeHistory');
+                renderHistory([]);
+            }
+        });
+        
+        // Обработчики для загрузки файла
+        uploadBtn.addEventListener('click', function() { fileInput.click(); });
+        
+        uploadArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            uploadArea.style.borderColor = 'var(--accent)';
+            uploadArea.style.backgroundColor = 'rgba(255,82,82,0.1)';
+        });
+        
+        uploadArea.addEventListener('dragleave', function() {
+            uploadArea.style.borderColor = 'var(--border)';
+            uploadArea.style.backgroundColor = 'var(--bg)';
+        });
+        
+        uploadArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            uploadArea.style.borderColor = 'var(--border)';
+            uploadArea.style.backgroundColor = 'var(--bg)';
+            
+            if (e.dataTransfer.files.length) {
+                const file = e.dataTransfer.files[0];
+                if (file.name.endsWith('.md')) {
+                    processFile(file);
+                } else {
+                    alert('Пожалуйста, загрузите файл с расширением .md');
+                }
+            }
+        });
+        
+        fileInput.addEventListener('change', function(e) {
+            if (e.target.files.length) {
+                processFile(e.target.files[0]);
+            }
+        });
+        
+        // Обработчик загрузки по URL
+        loadUrlBtn.addEventListener('click', function() {
+            const url = urlInput.value.trim();
+            if (!url) {
+                alert('Пожалуйста, введите URL');
+                return;
+            }
+            
+            previewContainer.innerHTML = `
+                <div class="loader">
+                    <div class="spinner"></div>
+                    <p>Загрузка файла по URL...</p>
+                </div>
+            `;
+            
+            // Добавляем в историю перед загрузкой
+            addToHistory(url, url, true);
+            
+            try {
+                const readyou = new READYOU();
+                readyou.render(previewContainer, url);
+            } catch (e) {
+                previewContainer.innerHTML = '<div class="alert error">❌ Ошибка: ' + e.message + '</div>';
+            }
+            
+            urlInput.value = '';
+        });
+        
+        // Функция обработки файла
+        function processFile(file) {
+            if (!file.name.endsWith('.md')) {
+                alert('Пожалуйста, загрузите файл с расширением .md');
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const content = e.target.result;
+                
+                // Добавляем в историю
+                addToHistory(file.name, content, false);
+                
+                try {
+                    const readyou = new READYOU();
+                    previewContainer.innerHTML = '';
+                    readyou.render(previewContainer, content);
+                } catch (error) {
+                    previewContainer.innerHTML = '<div class="alert error">❌ Ошибка: ' + error.message + '</div>';
+                }
+            };
+            reader.readAsText(file);
+        }
+        
+        // Примеры для тестирования
+        function loadExample(type) {
+            let content = '';
+            let name = '';
+            
+            if (type === 'sample1') {
+                name = 'Простой README.md';
+                content = `
+# Простой README
+
+Это пример README файла с базовым синтаксисом Markdown.
+
+## Заголовок 2
+### Заголовок 3
+
+**Жирный текст** и *курсивный текст*.
+
+- Список 1
+- Список 2
+- Список 3
+
+[Ссылка на GitHub](https://github.com)
+
+\`код в строке\`
+
+> Это цитата
+                `;
+            } else if (type === 'sample2') {
+                name = 'README с таблицами.md';
+                content = `
+# README с таблицами и списками
+
+## Таблица
+
+| Заголовок 1 | Заголовок 2 | Заголовок 3 |
+|-------------|-------------|-------------|
+| Строка 1    | Данные      | Информация  |
+| Строка 2    | Еще данные  | Подробности |
+| Строка 3    | Последние   | Детали      |
+
+## Вложенные списки
+
+- Основной элемент 1
+  - Подэлемент 1.1
+  - Подэлемент 1.2
+- Основной элемент 2
+  - Подэлемент 2.1
+  - Подэлемент 2.2
+- Основной элемент 3
+                `;
+            } else if (type === 'sample3') {
+                name = 'README с кодом.md';
+                content = `
+# README с кодом и изображениями
+
+## Блок кода на JavaScript
+
+\`\`\`javascript
+function greet(name) {
+    return \`Привет, \${name}!\`;
+}
+
+const message = greet('Мир');
+console.log(message);
+\`\`\`
+
+## Блок кода на HTML
+
+\`\`\`html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Пример страницы</title>
+</head>
+<body>
+    <h1>Привет, мир!</h1>
+    <p>Это пример HTML страницы.</p>
+</body>
+</html>
+\`\`\`
+
+## Изображение
+
+![Логотип GitHub](https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png)
+                `;
+            }
+            
+            // Добавляем в историю
+            addToHistory(name, content, false);
+            
+            try {
+                const readyou = new READYOU();
+                previewContainer.innerHTML = '';
+                readyou.render(previewContainer, content);
+            } catch (e) {
+                previewContainer.innerHTML = '<div class="alert error">❌ Ошибка: ' + e.message + '</div>';
+            }
+        }
+        
+        // Инициализация при загрузке
+        document.addEventListener('DOMContentLoaded', function() {
+            initTheme();
+            initHistory();
+        });
+    </script>
+</body>
+</html>
